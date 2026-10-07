@@ -135,6 +135,28 @@ h1 { font-size: clamp(2.6rem, 10vw, 6rem); }
 .drawer .spacer { flex: 1 1 auto; }
 @media (max-width: 520px) { .drawer { grid-template-columns: 1fr; } }
 </style>
+
+<style>
+.wrap { max-width: 1280px; }
+.add .in { flex: 1 1 220px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+#task-time { flex: 0 1 130px; min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.col { border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; display: flex; flex-direction: column; gap: 10px; background: var(--panel); }
+.col[data-c="p1"] { border-color: var(--pink); }
+.col[data-c="p1"] h2 { color: var(--pink); }
+.col-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.col h2 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 1.6rem; line-height: 1; margin: 0; -webkit-text-stroke: 0.015em currentColor; }
+.col .count { font-family: var(--display); font-size: 1.3rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.col .hint { margin: -4px 0 2px; font-size: 0.82rem; color: var(--muted); }
+.col .drawer { grid-template-columns: 1fr; }
+.col[data-c="done"] .task-text { text-decoration: line-through; color: var(--muted); cursor: default; }
+.col[data-c="done"] .check { background: var(--pink); border-color: var(--pink); }
+.addr { grid-column: 2; font-size: 0.85rem; overflow-wrap: anywhere; }
+.addr a { color: var(--pink); }
+.seg { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
+@media (max-width: 1040px) { .board { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .board { grid-template-columns: 1fr; } }
+</style>
 </head>
 <body>
 <div class="setup" id="setup" hidden>
@@ -158,9 +180,9 @@ h1 { font-size: clamp(2.6rem, 10vw, 6rem); }
   </header>
 
   <section class="stats" aria-label="Summary">
-    <div class="stat"><b id="st-today">0</b><span>To do today</span></div>
-    <div class="stat"><b id="st-over">0</b><span>Overdue</span></div>
-    <div class="stat"><b id="st-wait">0</b><span>Waiting on others</span></div>
+    <div class="stat"><b id="st-p1">0</b><span>Priority</span></div>
+    <div class="stat"><b id="st-p2">0</b><span>Second priority</span></div>
+    <div class="stat"><b id="st-fwd">0</b><span>Moved forward</span></div>
     <div class="stat"><b id="st-done">0</b><span>Done today</span></div>
   </section>
 
@@ -171,18 +193,23 @@ h1 { font-size: clamp(2.6rem, 10vw, 6rem); }
 
   <form class="add" id="add-form" autocomplete="off">
     <div class="add-row">
-      <input id="task-text" type="text" placeholder="New task. Type it and press Enter." aria-label="Task" maxlength="200" required>
+      <input class="in" id="task-text" type="text" placeholder="Task name" aria-label="Task name" maxlength="200" required>
       <select id="task-tag" aria-label="Category"></select>
     </div>
     <div class="add-row">
-      <input id="task-due" type="date" aria-label="Due date">
+      <input class="in" id="task-note" type="text" placeholder="Note (optional)" aria-label="Note" maxlength="300">
+      <input class="in" id="task-addr" type="text" placeholder="Address (optional)" aria-label="Address" maxlength="300">
+    </div>
+    <div class="add-row">
+      <input id="task-due" type="date" aria-label="Date">
+      <input id="task-time" type="time" aria-label="Time">
       <button type="button" class="flag small" id="due-today">Today</button>
       <button type="button" class="flag small" id="due-tmr">Tomorrow</button>
       <button type="button" class="flag small" id="due-none">No date</button>
     </div>
     <div class="add-row">
-      <button type="button" class="flag" id="flag-urgent" aria-pressed="false">Urgent</button>
-      <button type="button" class="flag" id="flag-important" aria-pressed="false">Important</button>
+      <button type="button" class="flag" id="stage-p1" aria-pressed="false">Priority</button>
+      <button type="button" class="flag" id="stage-p2" aria-pressed="true">Second priority</button>
       <button type="button" class="flag" id="flag-quick" aria-pressed="false">Quick, under 5 min</button>
       <button type="submit" class="primary" id="add-btn">Add task</button>
     </div>
@@ -213,54 +240,58 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
 /* ====================================== */
 
 (function () {
-  var TAGS = ["Boss", "Client", "Admin", "Finance", "Marketing"];
-  var QUADS = [
-    { q: 1, name: "Do first", hint: "Urgent and important.", empty: "Nothing on fire." },
-    { q: 2, name: "Plan a time", hint: "Important, not urgent. Give each one a date.", empty: "Nothing to schedule." },
-    { q: 3, name: "Quick or hand off", hint: "Urgent, not important. Do it fast or pass it on.", empty: "Nothing here." },
-    { q: 4, name: "Leave for later", hint: "Neither. Only if there is spare time.", empty: "Nothing parked." }
+  var TAGS = ["Boss", "Client", "Admin", "Finance", "Agent"];
+  var STAGES = [
+    { c: "p1", name: "Priority", short: "Priority", hint: "Do these first.", empty: "Nothing here. Well done." },
+    { c: "p2", name: "Second priority", short: "Second", hint: "Next, once Priority is clear.", empty: "Nothing here." },
+    { c: "forward", name: "Move forward", short: "Forward", hint: "Pushed to another day.", empty: "Nothing carried forward." }
   ];
-  var VIEWS = [["today", "Today"], ["all", "All tasks"], ["waiting", "Waiting"], ["done", "Done"]];
-  var COLS = "id,text,note,tag,urgent,important,quick,waiting_on,repeat,due,done,done_at,created_at";
+  var VIEWS = [["board", "Board"], ["waiting", "Waiting"]];
+  var COLS = "id,text,note,address,tag,stage,urgent,quick,waiting_on,repeat,due,due_time,done,done_at,created_at";
   var $ = function (id) { return document.getElementById(id); };
   var tasks = {}, chains = {}, sb = null, signedIn = false;
-  var view = "today", tagFilter = "", quickOnly = false, openId = null;
+  var view = "board", tagFilter = "", quickOnly = false, openId = null;
 
   if (SUPABASE_KEY.indexOf("PASTE_") === 0 || !window.supabase) { $("setup").hidden = false; return; }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  /* ---------- dates ---------- */
+  /* ---------- dates and times ---------- */
   function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function parse(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
   function today() { return ymd(new Date()); }
   function addDays(s, n) { var d = parse(s); d.setDate(d.getDate() + n); return ymd(d); }
   function nice(s) { return parse(s).toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
-  function dueInfo(due) {
-    if (!due) return null;
-    var t = today();
-    if (due < t) return { text: "Overdue", cls: "late" };
-    if (due === t) return { text: "Today", cls: "today" };
-    if (due === addDays(t, 1)) return { text: "Tomorrow", cls: "" };
-    return { text: nice(due), cls: "" };
+  function niceTime(s) {
+    if (!s) return "";
+    var p = s.split(":"), hr = +p[0];
+    return (hr % 12 || 12) + ":" + p[1] + (hr < 12 ? " AM" : " PM");
+  }
+  function dueInfo(t) {
+    var time = niceTime(t.due_time);
+    if (!t.due) return time ? { text: time, cls: "" } : null;
+    var td = today(), text, cls = "";
+    if (t.due < td) { text = "Overdue, " + nice(t.due); cls = "late"; }
+    else if (t.due === td) { text = "Today"; cls = "today"; }
+    else if (t.due === addDays(td, 1)) text = "Tomorrow";
+    else text = nice(t.due);
+    return { text: text + (time ? ", " + time : ""), cls: cls };
   }
   function nextDue(t) {
-    var base = t.due && t.due > today() ? t.due : today();
-    if (t.repeat === "daily") return addDays(base, 1);
-    if (t.repeat === "weekly") return addDays(t.due || today(), 7) > today() ? addDays(t.due || today(), 7) : addDays(today(), 7);
-    var d = parse(t.due || today()); d.setMonth(d.getMonth() + 1);
-    return ymd(d) > today() ? ymd(d) : addDays(today(), 30);
+    var td = today(), base = t.due || td, n;
+    if (t.repeat === "daily") n = addDays(base > td ? base : td, 1);
+    else if (t.repeat === "weekly") n = addDays(base, 7);
+    else { var d = parse(base); d.setMonth(d.getMonth() + 1); n = ymd(d); }
+    return n > td ? n : addDays(td, t.repeat === "weekly" ? 7 : t.repeat === "daily" ? 1 : 30);
   }
 
-  /* ---------- ranking ---------- */
-  function quadOf(t) { return t.urgent ? (t.important ? 1 : 3) : (t.important ? 2 : 4); }
-  function score(t) {
-    var td = today();
-    return (t.due && t.due < td ? 16 : 0) + (t.urgent ? 8 : 0) + (t.due === td ? 4 : 0) + (t.important ? 2 : 0) + (t.quick ? 1 : 0);
-  }
-  function byScore(a, b) {
-    var d = score(b) - score(a); if (d) return d;
+  /* ---------- order ---------- */
+  function stageOf(t) { return t.stage || (t.urgent ? "p1" : "p2"); }
+  function byWhen(a, b) {
     var da = a.due || "9999", db_ = b.due || "9999";
-    return da < db_ ? -1 : da > db_ ? 1 : (a.created_at < b.created_at ? -1 : 1);
+    if (da !== db_) return da < db_ ? -1 : 1;
+    var ta = a.due_time || "99", tb = b.due_time || "99";
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return a.created_at < b.created_at ? -1 : 1;
   }
 
   /* ---------- saving ---------- */
@@ -281,7 +312,7 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
   function removeTask(id) { delete tasks[id]; render(); write(id, function () { return sb.from("tasks").delete().eq("id", id); }); }
   function load() {
     return sb.from("tasks").select(COLS).then(function (r) {
-      if (r.error) { $("save-note").textContent = "Could not load your tasks. Check your connection."; return; }
+      if (r.error) { $("save-note").textContent = "Could not load your tasks. If you just updated the app, run the update script in Supabase first."; return; }
       var next = {}; r.data.forEach(function (t) { next[t.id] = t; });
       tasks = next; render();
     });
@@ -293,17 +324,23 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     });
   }
   function blank(text) {
-    return { id: newId(), text: text, note: null, tag: null, urgent: false, important: false, quick: false,
-             waiting_on: null, repeat: null, due: null, done: false, done_at: null, created_at: new Date().toISOString() };
+    return { id: newId(), text: text, note: null, address: null, tag: null, stage: "p2", urgent: false, quick: false,
+             waiting_on: null, repeat: null, due: null, due_time: null, done: false, done_at: null, created_at: new Date().toISOString() };
   }
   function complete(t) {
     patchTask(t.id, { done: true, done_at: new Date().toISOString() });
     if (t.repeat) {
-      var n = Object.assign(blank(t.text), { note: t.note, tag: t.tag, urgent: t.urgent, important: t.important,
-                                             quick: t.quick, repeat: t.repeat, due: nextDue(t) });
+      var st = stageOf(t);
+      var n = Object.assign(blank(t.text), { note: t.note, address: t.address, tag: t.tag, quick: t.quick, repeat: t.repeat,
+                                             stage: st === "forward" ? "p2" : st, due: nextDue(t), due_time: t.due_time });
       putTask(n);
       showToast("Done. Next one added for " + nice(n.due) + ".", null);
     }
+  }
+  function moveTo(t, c) {
+    var patch = { stage: c };
+    if (c === "forward" && (!t.due || t.due <= today())) patch.due = addDays(today(), 1);
+    patchTask(t.id, patch);
   }
 
   /* ---------- building blocks ---------- */
@@ -316,37 +353,33 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     options.forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; s.appendChild(op); });
     s.value = value || ""; return s;
   }
-  function toggle(id, text, on) {
-    var b = btn("flag small", text, function () { b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")); });
-    b.id = id; b.setAttribute("aria-pressed", String(!!on)); return b;
-  }
   function pressed(id) { return $(id).getAttribute("aria-pressed") === "true"; }
   var TAG_OPTS = [["", "No category"]].concat(TAGS.map(function (t) { return [t, t]; }));
 
   function drawer(t) {
     var d = el("div", "drawer");
-    d.appendChild(field("Task", input("ed-text", "text", t.text), true));
-    d.appendChild(field("Note (phone number, details)", input("ed-note", "text", t.note, "Optional"), true));
-    d.appendChild(field("Due date", input("ed-due", "date", t.due)));
+    d.appendChild(field("Task name", input("ed-text", "text", t.text), true));
+    d.appendChild(field("Note", input("ed-note", "text", t.note, "Optional"), true));
+    d.appendChild(field("Address", input("ed-addr", "text", t.address, "Optional"), true));
+    d.appendChild(field("Date", input("ed-due", "date", t.due)));
+    d.appendChild(field("Time", input("ed-time", "time", t.due_time)));
     d.appendChild(field("Category", select("ed-tag", TAG_OPTS, t.tag)));
-    d.appendChild(field("Waiting on someone?", input("ed-wait", "text", t.waiting_on, "Their name. Empty if it is on you.")));
     d.appendChild(field("Repeats", select("ed-repeat", [["", "Does not repeat"], ["daily", "Every day"], ["weekly", "Every week"], ["monthly", "Every month"]], t.repeat)));
+    d.appendChild(field("Waiting on someone?", input("ed-wait", "text", t.waiting_on, "Their name. Empty if it is on you."), true));
     var row = el("div", "row");
-    row.appendChild(toggle("ed-urgent", "Urgent", t.urgent));
-    row.appendChild(toggle("ed-important", "Important", t.important));
-    row.appendChild(toggle("ed-quick", "Quick", t.quick));
-    row.appendChild(btn("flag small", "Move to tomorrow", function () { openId = null; patchTask(t.id, { due: addDays(today(), 1) }); }));
+    var q = btn("flag small", "Quick", function () { q.setAttribute("aria-pressed", String(q.getAttribute("aria-pressed") !== "true")); });
+    q.id = "ed-quick"; q.setAttribute("aria-pressed", String(!!t.quick)); row.appendChild(q);
     row.appendChild(el("span", "spacer"));
     row.appendChild(btn("mini", "Delete", function () {
       var copy = Object.assign({}, t); openId = null; removeTask(t.id);
       showToast("Task deleted", function () { putTask(copy); });
     }));
     row.appendChild(btn("primary", "Save", function () {
-      var text = $("ed-text").value.trim() || t.text;
-      var patch = { text: text, note: $("ed-note").value.trim() || null, due: $("ed-due").value || null,
-                    tag: $("ed-tag").value || null, waiting_on: $("ed-wait").value.trim() || null,
-                    repeat: $("ed-repeat").value || null, urgent: pressed("ed-urgent"),
-                    important: pressed("ed-important"), quick: pressed("ed-quick") };
+      var patch = { text: $("ed-text").value.trim() || t.text, note: $("ed-note").value.trim() || null,
+                    address: $("ed-addr").value.trim() || null, due: $("ed-due").value || null,
+                    due_time: $("ed-time").value || null, tag: $("ed-tag").value || null,
+                    waiting_on: $("ed-wait").value.trim() || null, repeat: $("ed-repeat").value || null,
+                    quick: pressed("ed-quick") };
       openId = null; patchTask(t.id, patch);
     }));
     d.appendChild(row);
@@ -366,23 +399,45 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     if (!t.done) { text.title = "Open details"; text.setAttribute("aria-expanded", String(openId === t.id)); }
     li.appendChild(text);
     if (t.note) li.appendChild(el("div", "note", t.note));
+    if (t.address) {
+      var a = el("div", "addr"), link = el("a", null, t.address);
+      link.href = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(t.address);
+      link.target = "_blank"; link.rel = "noopener"; link.title = "Open in Google Maps";
+      a.appendChild(link); li.appendChild(a);
+    }
 
     var meta = el("div", "meta");
     if (t.waiting_on && !t.done) meta.appendChild(el("span", "wait", "Waiting on " + t.waiting_on));
-    var d = dueInfo(t.due);
-    if (d && !t.done) meta.appendChild(el("span", "due " + d.cls, (t.waiting_on ? "Follow up: " : "") + d.text));
+    var d = dueInfo(t);
+    if (d) meta.appendChild(el("span", "due " + (t.done ? "" : d.cls), (t.waiting_on && !t.done ? "Follow up: " : "") + d.text));
     if (t.tag) meta.appendChild(el("span", "tagchip", t.tag));
     if (t.quick && !t.done) meta.appendChild(el("span", null, "Quick"));
     if (t.repeat) meta.appendChild(el("span", null, "Repeats " + t.repeat));
-    if (t.waiting_on && !t.done) {
-      var got = btn("mini del", "Got their reply", function () { patchTask(t.id, { waiting_on: null }); });
-      meta.appendChild(got);
-    }
+    if (t.waiting_on && !t.done) meta.appendChild(btn("mini del", "Got their reply", function () { patchTask(t.id, { waiting_on: null }); }));
     if (meta.childNodes.length) li.appendChild(meta);
+
+    if (!t.done && !t.waiting_on) {
+      var seg = el("div", "seg"), cur = stageOf(t);
+      seg.setAttribute("aria-label", "Move to");
+      STAGES.forEach(function (S) {
+        var b = btn("mini", S.short, function () { if (cur !== S.c) moveTo(t, S.c); });
+        b.setAttribute("aria-pressed", String(cur === S.c)); b.title = "Move to " + S.name;
+        seg.appendChild(b);
+      });
+      li.appendChild(seg);
+    }
     if (openId === t.id && !t.done) li.appendChild(drawer(t));
     return li;
   }
   function listOf(items) { var ul = el("ul", "list"); items.forEach(function (t) { ul.appendChild(taskRow(t)); }); return ul; }
+  function column(c, name, hint, items, emptyText) {
+    var sec = el("section", "col"); sec.dataset.c = c;
+    var head = el("div", "col-head");
+    head.appendChild(el("h2", null, name)); head.appendChild(el("span", "count", String(items.length)));
+    sec.appendChild(head); sec.appendChild(el("p", "hint", hint));
+    sec.appendChild(items.length ? listOf(items) : el("p", "empty", emptyText));
+    return sec;
+  }
 
   /* ---------- render ---------- */
   function render() {
@@ -390,39 +445,37 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     var all = Object.keys(tasks).map(function (k) { return tasks[k]; });
     var open = all.filter(function (t) { return !t.done; });
     var done = all.filter(function (t) { return t.done; }).sort(function (a, b) { return (a.done_at || "") < (b.done_at || "") ? 1 : -1; });
-    var active = open.filter(function (t) { return !t.waiting_on; }).sort(byScore);
-    var waiting = open.filter(function (t) { return t.waiting_on; }).sort(byScore);
-    var todayList = active.filter(function (t) { return t.urgent || (t.due && t.due <= td); });
+    var active = open.filter(function (t) { return !t.waiting_on; }).sort(byWhen);
+    var waiting = open.filter(function (t) { return t.waiting_on; }).sort(byWhen);
+    var by = { p1: [], p2: [], forward: [] };
+    active.forEach(function (t) { (by[stageOf(t)] || by.p2).push(t); });
     var followUps = waiting.filter(function (t) { return t.due && t.due <= td; });
     var doneToday = done.filter(function (t) { return t.done_at && ymd(new Date(t.done_at)) === td; }).length;
     function pass(t) { return (!tagFilter || t.tag === tagFilter) && (!quickOnly || t.quick); }
 
-    // numbers
     $("today").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
-    $("st-today").textContent = todayList.length + followUps.length;
-    $("st-over").textContent = open.filter(function (t) { return t.due && t.due < td; }).length;
-    $("st-wait").textContent = waiting.length;
+    $("st-p1").textContent = by.p1.length;
+    $("st-p2").textContent = by.p2.length;
+    $("st-fwd").textContent = by.forward.length;
     $("st-done").textContent = doneToday;
-    var total = doneToday + todayList.length + followUps.length;
-    $("prog-text").textContent = total ? doneToday + " of " + total + " done" : "Nothing due today";
+    var total = doneToday + by.p1.length + by.p2.length;
+    $("prog-text").textContent = total ? doneToday + " of " + total + " done" : "Nothing on the list yet";
     $("prog-fill").style.width = (total ? Math.round(doneToday / total * 100) : 0) + "%";
 
-    // start here
-    var top = todayList[0] || active[0] || null;
+    var top = by.p1[0] || by.p2[0] || null;
     $("next-text").textContent = top ? top.text : followUps.length ? "Follow up with " + followUps[0].waiting_on : "All clear. Add a task when the next one comes in.";
     $("next-done").hidden = !top;
     $("next-done").onclick = top ? function () { complete(top); } : null;
 
-    // tabs and filters
-    var counts = { today: todayList.length + followUps.length, all: active.length, waiting: waiting.length, done: null };
+    var counts = { board: active.length, waiting: waiting.length };
     var tabs = $("tabs"); tabs.textContent = "";
     VIEWS.forEach(function (v) {
       var b = btn("tab", v[1], function () { view = v[0]; openId = null; render(); });
       b.setAttribute("aria-pressed", String(view === v[0]));
-      if (counts[v[0]] != null) b.appendChild(el("i", null, String(counts[v[0]])));
+      b.appendChild(el("i", null, String(counts[v[0]])));
       tabs.appendChild(b);
     });
-    var chips = $("chips"); chips.textContent = ""; chips.hidden = view === "done";
+    var chips = $("chips"); chips.textContent = "";
     [["", "All"]].concat(TAGS.map(function (t) { return [t, t]; })).forEach(function (c) {
       var b = btn("chip", c[1], function () { tagFilter = c[0]; render(); });
       b.setAttribute("aria-pressed", String(tagFilter === c[0])); chips.appendChild(b);
@@ -430,34 +483,21 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     var q = btn("chip", "Quick wins only", function () { quickOnly = !quickOnly; render(); });
     q.setAttribute("aria-pressed", String(quickOnly)); chips.appendChild(q);
 
-    // the view
     var box = $("view"); box.textContent = "";
-    if (view === "today") {
-      var tl = todayList.filter(pass), fu = followUps.filter(pass);
-      if (tl.length) box.appendChild(listOf(tl));
-      else box.appendChild(el("p", "empty", todayList.length ? "Nothing matches this filter." : "Nothing due or urgent today. Pick something from All tasks if you have time."));
+    if (view === "board") {
+      var board = el("div", "board");
+      STAGES.forEach(function (S) { board.appendChild(column(S.c, S.name, S.hint, by[S.c].filter(pass), S.empty)); });
+      var shown = done.filter(function (t) { return !tagFilter || t.tag === tagFilter; }).slice(0, 15);
+      var dc = column("done", "Done", "Ticked off, newest first.", shown, "Nothing ticked off yet.");
+      if (done.length) dc.appendChild(btn("link", "Clear all done tasks", function () { done.forEach(function (t) { removeTask(t.id); }); }));
+      board.appendChild(dc);
+      box.appendChild(board);
+      var fu = followUps.filter(pass);
       if (fu.length) { box.appendChild(el("h2", "sec-title", "Follow up today")); box.appendChild(listOf(fu)); }
-    } else if (view === "all") {
-      var grid = el("div", "grid");
-      QUADS.forEach(function (Q) {
-        var items = active.filter(function (t) { return quadOf(t) === Q.q && pass(t); });
-        var sec = el("section", "quad"); sec.dataset.q = Q.q;
-        var head = el("div", "quad-head");
-        head.appendChild(el("h2", null, Q.name)); head.appendChild(el("span", "count", String(items.length)));
-        sec.appendChild(head); sec.appendChild(el("p", "hint", Q.hint));
-        sec.appendChild(items.length ? listOf(items) : el("p", "empty", Q.empty));
-        grid.appendChild(sec);
-      });
-      box.appendChild(grid);
-    } else if (view === "waiting") {
+    } else {
       var wl = waiting.filter(pass);
       if (wl.length) box.appendChild(listOf(wl));
       else box.appendChild(el("p", "empty", waiting.length ? "Nothing matches this filter." : "You are not waiting on anyone. When you ask someone for something, open the task and fill in who you are waiting on, so it does not get forgotten."));
-    } else {
-      if (done.length) {
-        box.appendChild(listOf(done.slice(0, 60)));
-        box.appendChild(btn("link", "Clear all done tasks", function () { done.forEach(function (t) { removeTask(t.id); }); }));
-      } else box.appendChild(el("p", "empty", "Nothing ticked off yet."));
     }
     var first = openId && $("ed-text"); if (first && document.activeElement === document.body) first.focus();
   }
@@ -475,17 +515,19 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
   $("task-due").value = today();
   $("due-today").onclick = function () { $("task-due").value = today(); };
   $("due-tmr").onclick = function () { $("task-due").value = addDays(today(), 1); };
-  $("due-none").onclick = function () { $("task-due").value = ""; };
-  ["flag-urgent", "flag-important", "flag-quick"].forEach(function (id) {
-    $(id).onclick = function () { this.setAttribute("aria-pressed", String(!pressed(id))); };
-  });
+  $("due-none").onclick = function () { $("task-due").value = ""; $("task-time").value = ""; };
+  function setStage(c) { $("stage-p1").setAttribute("aria-pressed", String(c === "p1")); $("stage-p2").setAttribute("aria-pressed", String(c === "p2")); }
+  $("stage-p1").onclick = function () { setStage("p1"); };
+  $("stage-p2").onclick = function () { setStage("p2"); };
+  $("flag-quick").onclick = function () { this.setAttribute("aria-pressed", String(!pressed("flag-quick"))); };
   $("add-form").addEventListener("submit", function (e) {
     e.preventDefault();
     var text = $("task-text").value.trim(); if (!text) return;
-    putTask(Object.assign(blank(text), { urgent: pressed("flag-urgent"), important: pressed("flag-important"),
-      quick: pressed("flag-quick"), tag: $("task-tag").value || null, due: $("task-due").value || null }));
-    $("task-text").value = ""; $("task-due").value = today();
-    ["flag-urgent", "flag-important", "flag-quick"].forEach(function (id) { $(id).setAttribute("aria-pressed", "false"); });
+    putTask(Object.assign(blank(text), { note: $("task-note").value.trim() || null, address: $("task-addr").value.trim() || null,
+      stage: pressed("stage-p1") ? "p1" : "p2", quick: pressed("flag-quick"), tag: $("task-tag").value || null,
+      due: $("task-due").value || null, due_time: $("task-time").value || null }));
+    ["task-text", "task-note", "task-addr", "task-time"].forEach(function (id) { $(id).value = ""; });
+    $("task-due").value = today(); setStage("p2"); $("flag-quick").setAttribute("aria-pressed", "false");
     $("task-text").focus();
   });
 
@@ -507,7 +549,6 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     var isIn = !!session;
     if (event === "INITIAL_SESSION" || isIn !== signedIn) show(isIn);
   });
-  // pick up changes made on another device when you come back to the app
   document.addEventListener("visibilitychange", function () { if (!document.hidden && signedIn && !openId) load(); });
 })();
 </script>
