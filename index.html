@@ -153,6 +153,13 @@ h1 { font-size: clamp(2.6rem, 10vw, 6rem); }
 .col[data-c="done"] .check { background: var(--pink); border-color: var(--pink); }
 .addr { grid-column: 2; font-size: 0.85rem; overflow-wrap: anywhere; }
 .addr a { color: var(--pink); }
+.board .task { cursor: grab; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.board .task input { -webkit-user-select: text; user-select: text; }
+.task.ghost { opacity: 0.35; border-style: dashed; border-color: var(--pink); }
+.drag-clone { position: fixed; z-index: 50; pointer-events: none; margin: 0; list-style: none; transform: rotate(1.5deg); box-shadow: 0 14px 36px rgba(0,0,0,.55); border-color: var(--pink); }
+.col.over { outline: 2px solid var(--pink); outline-offset: 2px; }
+body.dragging-on { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+.drag-tip { font-size: 0.82rem; color: var(--muted); margin: 0; }
 .seg { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
 @media (max-width: 1040px) { .board { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 640px) { .board { grid-template-columns: 1fr; } }
@@ -388,7 +395,7 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
   }
 
   function taskRow(t) {
-    var li = el("li", "task");
+    var li = el("li", "task"); li.dataset.id = t.id;
     var check = btn("check", null, function () {
       if (t.done) patchTask(t.id, { done: false, done_at: null }); else { if (openId === t.id) openId = null; complete(t); }
     });
@@ -435,9 +442,99 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
     var head = el("div", "col-head");
     head.appendChild(el("h2", null, name)); head.appendChild(el("span", "count", String(items.length)));
     sec.appendChild(head); sec.appendChild(el("p", "hint", hint));
-    sec.appendChild(items.length ? listOf(items) : el("p", "empty", emptyText));
+    var ul = listOf(items); ul.dataset.c = c; sec.appendChild(ul);
+    if (!items.length) sec.appendChild(el("p", "empty", emptyText));
     return sec;
   }
+
+  /* ---------- drag and drop between columns ---------- */
+  var drag = null, swallowClick = false;
+  function colAt(x, y) {
+    var e = document.elementFromPoint(x, y), hit = e && e.closest ? e.closest(".col") : null;
+    if (hit) return hit;
+    // released in the small gap between two columns: take the nearest column
+    var best = null, bestD = 40;
+    Array.prototype.forEach.call(document.querySelectorAll(".board .col"), function (c) {
+      var r = c.getBoundingClientRect();
+      var dx = Math.max(r.left - x, 0, x - r.right), dy = Math.max(r.top - y, 0, y - r.bottom), d = Math.max(dx, dy);
+      if (d < bestD) { bestD = d; best = c; }
+    });
+    return best;
+  }
+  function clearOver() { Array.prototype.forEach.call(document.querySelectorAll(".col.over"), function (c) { c.classList.remove("over"); }); }
+  function startDrag() {
+    if (!drag) return;
+    var r = drag.li.getBoundingClientRect();
+    drag.active = true; drag.offX = drag.x - r.left; drag.offY = drag.y - r.top;
+    var c = drag.li.cloneNode(true); c.classList.add("drag-clone");
+    c.style.width = r.width + "px"; c.style.left = r.left + "px"; c.style.top = r.top + "px";
+    document.body.appendChild(c); drag.clone = c;
+    drag.li.classList.add("ghost"); document.body.classList.add("dragging-on");
+    if (drag.touch && navigator.vibrate) navigator.vibrate(12);
+    drag.raf = requestAnimationFrame(edgeScroll);
+  }
+  // while dragging near the top or bottom edge, scroll the page so far-away columns can be reached
+  function edgeScroll() {
+    if (!drag || !drag.active) return;
+    var y = drag.cy == null ? drag.y : drag.cy, edge = 90, step = 0;
+    if (y < edge) step = -Math.ceil((edge - y) / 14);
+    else if (y > window.innerHeight - edge) step = Math.ceil((y - (window.innerHeight - edge)) / 14);
+    if (step) { window.scrollBy(0, step); clearOver(); var c = colAt(drag.cx, y); if (c) c.classList.add("over"); }
+    drag.raf = requestAnimationFrame(edgeScroll);
+  }
+  function endDrag() {
+    if (!drag) return;
+    clearTimeout(drag.timer); cancelAnimationFrame(drag.raf);
+    if (drag.clone) drag.clone.remove();
+    drag.li.classList.remove("ghost"); document.body.classList.remove("dragging-on"); clearOver();
+    drag = null;
+  }
+  document.addEventListener("pointerdown", function (e) {
+    if (e.button || drag) return;
+    var li = e.target.closest ? e.target.closest(".board .task") : null;
+    if (!li || e.target.closest("input, select, a, .drawer, .mini, .check")) return;
+    drag = { li: li, id: li.dataset.id, x: e.clientX, y: e.clientY, touch: e.pointerType !== "mouse", active: false };
+    if (drag.touch) drag.timer = setTimeout(startDrag, 260);
+  });
+  document.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    var far = Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
+    if (!drag.active) {
+      if (drag.touch) { if (far > 12) endDrag(); return; }
+      if (far < 7) return;
+      startDrag();
+    }
+    drag.cx = e.clientX; drag.cy = e.clientY;
+    drag.clone.style.left = (e.clientX - drag.offX) + "px"; drag.clone.style.top = (e.clientY - drag.offY) + "px";
+    clearOver(); var c = colAt(e.clientX, e.clientY); if (c) c.classList.add("over");
+  });
+  function drop(x, y) {
+    if (!drag) return;
+    if (!drag.active) { endDrag(); return; }
+    var t = tasks[drag.id], fromCol = drag.li.closest(".col"), toCol = colAt(x, y);
+    var from = fromCol && fromCol.dataset.c, to = toCol && toCol.dataset.c;
+    endDrag();
+    swallowClick = true; setTimeout(function () { swallowClick = false; }, 0);
+    if (!t || !to || from === to) return;
+    if (to === "done") complete(t);
+    else if (from === "done") patchTask(t.id, { done: false, done_at: null, stage: to });
+    else moveTo(t, to);
+  }
+  document.addEventListener("pointerup", function (e) { drop(e.clientX, e.clientY); });
+  // on phones the browser may cancel the pointer mid-drag; the touch events below finish the drag instead
+  document.addEventListener("pointercancel", function () { if (!(drag && drag.active && drag.touch)) endDrag(); });
+  document.addEventListener("touchend", function () { if (drag && drag.active) drop(drag.cx == null ? drag.x : drag.cx, drag.cy == null ? drag.y : drag.cy); else endDrag(); });
+  document.addEventListener("touchcancel", endDrag);
+  document.addEventListener("click", function (e) { if (swallowClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+  document.addEventListener("touchmove", function (e) {
+    if (!(drag && drag.active)) return;
+    e.preventDefault();
+    var p = e.touches[0]; if (!p) return;
+    drag.cx = p.clientX; drag.cy = p.clientY;
+    drag.clone.style.left = (p.clientX - drag.offX) + "px"; drag.clone.style.top = (p.clientY - drag.offY) + "px";
+    clearOver(); var c = colAt(p.clientX, p.clientY); if (c) c.classList.add("over");
+  }, { passive: false });
+  document.addEventListener("contextmenu", function (e) { if (drag) e.preventDefault(); });
 
   /* ---------- render ---------- */
   function render() {
@@ -491,6 +588,7 @@ var SUPABASE_KEY = "sb_publishable_sANmjHz0YoJp2aMJOO7Dtg_lDQc7jkY";
       var dc = column("done", "Done", "Ticked off, newest first.", shown, "Nothing ticked off yet.");
       if (done.length) dc.appendChild(btn("link", "Clear all done tasks", function () { done.forEach(function (t) { removeTask(t.id); }); }));
       board.appendChild(dc);
+      box.appendChild(el("p", "drag-tip", "Drag a task to another column to move it. On a phone, press and hold the task, then drag."));
       box.appendChild(board);
       var fu = followUps.filter(pass);
       if (fu.length) { box.appendChild(el("h2", "sec-title", "Follow up today")); box.appendChild(listOf(fu)); }
